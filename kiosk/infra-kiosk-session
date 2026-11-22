@@ -1,0 +1,33 @@
+#!/bin/sh
+# Runs inside cage: rotates the DSI output, then starts Firefox in kiosk mode on the dashboard served by infra-kiosk-helper.
+set -eu
+
+# cage ignores the kernel cmdline rotation (video=DSI-1:...,rotation=270 only turns the text console), so the
+# rotation is applied here. KIOSK_TRANSFORM comes from /etc/default/infra-kiosk; set it with infra-kiosk-rotate,
+# which keeps the touch calibration in step
+TRANSFORM=${KIOSK_TRANSFORM:-normal}
+URL="http://127.0.0.1:8090/infra-dashboard.html?kiosk"
+PROFILE="$HOME/firefox-profile"
+
+# A DSI panel can have a different number under Wayland than on the kernel cmdline (DSI-2 vs DSI-1), so take
+# the first DSI output by name, or else the first output
+OUTPUT=$(wlr-randr | awk '/^DSI-/{print $1; exit}')
+[ -n "$OUTPUT" ] || OUTPUT=$(wlr-randr | awk '/^[^ ]/{print $1; exit}')
+wlr-randr --output "$OUTPUT" --transform "$TRANSFORM" || true
+
+# Fixed profile without first-run pages, session-restore prompts or telemetry; at most 10 frames/s, since the
+# passively cooled Pi renders the page on the CPU and the dashboard only changes every few seconds
+mkdir -p "$PROFILE"
+cat > "$PROFILE/user.js" <<'EOF'
+user_pref("browser.aboutwelcome.enabled", false);
+user_pref("browser.startup.homepage_override.mstone", "ignore");
+user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
+user_pref("datareporting.healthreport.uploadEnabled", false);
+user_pref("toolkit.telemetry.enabled", false);
+user_pref("app.update.enabled", false);
+user_pref("layout.frame_rate", 10);
+EOF
+
+exec firefox --kiosk --profile "$PROFILE" "$URL"

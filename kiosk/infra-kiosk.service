@@ -1,0 +1,35 @@
+# Fullscreen infra dashboard on the 7" DSI display: cage (Wayland kiosk compositor) + Firefox on tty7.
+# Pattern: https://github.com/cage-kiosk/cage/wiki/Starting-Cage-on-boot-with-systemd
+[Unit]
+Description=Infra dashboard kiosk (cage + Firefox) on tty7
+After=systemd-user-sessions.service dbus.socket systemd-logind.service network-online.target infra-kiosk-helper.service
+Wants=dbus.socket systemd-logind.service network-online.target infra-kiosk-helper.service
+ConditionPathExists=/dev/tty0
+
+[Service]
+Type=simple
+# KIOSK_TRANSFORM (read by infra-kiosk-session) and KIOSK_TOUCH_MODULE
+EnvironmentFile=-/etc/default/infra-kiosk
+# Night hours and pauses (infra-kiosk-ctl): skip the start, e.g. after a reboot at night
+ExecCondition=+/usr/local/bin/infra-kiosk-ctl should-run
+# Touch controllers that fail to probe before the panel powers up (Goodix: -121, I2C NACK) work after a reload
+ExecStartPre=+/bin/sh -c '[ -z "$${KIOSK_TOUCH_MODULE:-}" ] || { modprobe -r "$$KIOSK_TOUCH_MODULE"; modprobe "$$KIOSK_TOUCH_MODULE"; sleep 1; }'
+# The logind session on tty7 is only active (and cage only gets the display) while tty7 is the foreground VT
+ExecStartPre=+/usr/bin/chvt 7
+ExecStart=/usr/bin/cage -- /usr/local/bin/infra-kiosk-session
+Restart=always
+RestartSec=5
+User=infra-kiosk
+PAMName=infra-kiosk
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty7
+UtmpMode=user
+
+[Install]
+WantedBy=multi-user.target

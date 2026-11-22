@@ -1,0 +1,60 @@
+#!/bin/sh
+# Kiosk schedule: the kiosk (cage + Firefox) runs only by day and only when no pause is set.
+#   infra-kiosk-ctl pause "tomorrow 18:00"   kiosk off until then (any `date -d` string; survives reboots)
+#   infra-kiosk-ctl resume                   cancel the pause
+#   infra-kiosk-ctl status
+#   infra-kiosk-ctl apply                    start/stop to match the schedule (infra-kiosk-ctl.timer, every 5 min)
+#   infra-kiosk-ctl should-run               exit 0 if the kiosk may run (ExecCondition of infra-kiosk.service)
+set -eu
+
+DAY_FROM=8 NIGHT_FROM=22  # local hours; keep in sync with NIGHT_TO / NIGHT_FROM in infra-kiosk-helper
+PAUSE_FILE=/var/lib/infra-kiosk-ctl/pause-until  # epoch seconds; /var/lib so a pause survives reboots
+OFF_FLAG=/run/infra-kiosk-ctl/off                # read by infra-kiosk-helper: screen dark while the kiosk is off
+
+paused() {
+    [ -f "$PAUSE_FILE" ] && [ "$(date +%s)" -lt "$(cat "$PAUSE_FILE")" ]
+}
+
+should_run() {
+    h=$(date +%-H)
+    [ "$h" -ge "$DAY_FROM" ] && [ "$h" -lt "$NIGHT_FROM" ] && ! paused
+}
+
+apply() {
+    if should_run; then
+        rm -f "$OFF_FLAG"
+        if ! systemctl is-active --quiet infra-kiosk; then systemctl start infra-kiosk; fi
+    else
+        mkdir -p "${OFF_FLAG%/*}"
+        : > "$OFF_FLAG"
+        if systemctl is-active --quiet infra-kiosk; then systemctl stop infra-kiosk; fi
+    fi
+}
+
+case "${1:-}" in
+    should-run)
+        should_run ;;
+    apply)
+        apply ;;
+    pause)
+        until=$(date -d "${2:?usage: infra-kiosk-ctl pause \"tomorrow 18:00\"}" +%s)
+        if [ "$until" -le "$(date +%s)" ]; then
+            echo "$(date -d "@$until" '+%F %R') is in the past; for tomorrow write \"tomorrow 18:00\"" >&2
+            exit 1
+        fi
+        mkdir -p "${PAUSE_FILE%/*}"
+        echo "$until" > "$PAUSE_FILE"
+        apply
+        echo "kiosk paused until $(date -d "@$until" '+%F %R')" ;;
+    resume)
+        rm -f "$PAUSE_FILE"
+        apply
+        echo "pause cleared" ;;
+    status)
+        if paused; then echo "paused until $(date -d "@$(cat "$PAUSE_FILE")" '+%F %R')"; else echo "no pause"; fi
+        if should_run; then echo "schedule: on"; else echo "schedule: off"; fi
+        echo "infra-kiosk: $(systemctl is-active infra-kiosk || true)" ;;
+    *)
+        sed -n '2,7p' "$0" >&2
+        exit 2 ;;
+esac

@@ -1,0 +1,9 @@
+# Settings for infra-kiosk.service, installed as /etc/default/infra-kiosk.
+
+# Picture rotation for the display output (wlr-randr --transform): normal, 90, 180 or 270.
+# Change it with `sudo infra-kiosk-rotate <value>`, which also rewrites the touch calibration to match.
+KIOSK_TRANSFORM=270
+
+# Touch driver module to reload before every kiosk start; empty = no reload. A Goodix controller can fail to
+# probe at boot (-121, I2C NACK) because the panel is not powered yet, and a reload fixes it.
+KIOSK_TOUCH_MODULE=goodix_ts

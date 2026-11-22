@@ -1,0 +1,9 @@
+# Starts or stops infra-kiosk.service to match the schedule and pause in infra-kiosk-ctl (run by infra-kiosk-ctl.timer)
+[Unit]
+Description=Infra kiosk schedule
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/infra-kiosk-ctl apply
+# Runs every 5 minutes: keep the "Starting/Finished" lines out of the journal
+LogLevelMax=notice

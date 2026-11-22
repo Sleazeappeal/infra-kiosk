@@ -1,0 +1,10 @@
+# Applies the kiosk schedule every 5 minutes (08:00, 22:00 and pause ends like 18:00 fall on this grid)
+[Unit]
+Description=Infra kiosk schedule (every 5 min)
+
+[Timer]
+OnCalendar=*:0/5
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

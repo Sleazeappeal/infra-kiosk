@@ -1,0 +1,19 @@
+# Local helper for the kiosk: dashboard files and backlight schedule (127.0.0.1:8090)
+[Unit]
+Description=Infra kiosk helper (dashboard, backlight)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/infra-kiosk-helper
+Restart=always
+RestartSec=5
+User=infra-kiosk
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>infra // telemetria</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#070b08; --panel:#0d1510; --panel-edge:#16241a;
+    --ink:#bfe9cc; --dim:#5d7d68; --dimmer:#3c5546;
+    --ok:#46f08a; --ok-soft:#46f08a33;
+    --warn:#ffb454; --warn-soft:#ffb45433;
+    --crit:#ff5c5c; --crit-soft:#ff5c5c33;
+    --cyan:#5cd6ff;
+    --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+    --crt:'VT323',var(--mono);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--mono)}
+  body{min-height:100vh;background:radial-gradient(120% 70% at 50% -10%,#0f1a12 0%,var(--bg) 55%),var(--bg);background-attachment:fixed}
+  body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:9999;
+    background:repeating-linear-gradient(to bottom,rgba(0,0,0,0) 0 2px,rgba(0,0,0,.22) 2px 3px);
+    mix-blend-mode:multiply;opacity:.5}
+  .wrap{max-width:1900px;margin:0 auto;padding:18px 18px 48px}
+
+  header{display:flex;align-items:center;gap:18px;flex-wrap:wrap;border:1px solid var(--panel-edge);
+    background:linear-gradient(180deg,#0e1711,#0b110d);padding:14px 18px;border-radius:4px;
+    box-shadow:0 0 0 1px #000 inset,0 10px 30px -18px var(--ok-soft)}
+  .title{font-family:var(--crt);font-size:38px;line-height:.8;color:var(--ok);text-shadow:0 0 14px var(--ok-soft);letter-spacing:1px}
+  .title small{display:block;font-family:var(--mono);font-size:10px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;margin-top:6px}
+  .spacer{flex:1 1 auto}
+  .stat{display:flex;flex-direction:column;gap:2px;min-width:74px}
+  .stat .k{color:var(--dimmer);font-size:9.5px;letter-spacing:2px;text-transform:uppercase}
+  .stat .v{color:var(--ink);font-size:15px;font-weight:600}
+
+  /* two columns, one per host */
+  .cols{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-top:18px}
+  @media(max-width:1700px){.cols{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:1400px){.cols{grid-template-columns:1fr 1fr}}
+  @media(max-width:980px){.cols{grid-template-columns:1fr}}
+
+  .host{border:1px solid var(--panel-edge);border-radius:5px;background:linear-gradient(180deg,#0a110c,#080d0a);
+    padding:14px;box-shadow:0 0 0 1px #000 inset}
+  .host.offline{opacity:.55;filter:grayscale(.4)}
+  .host-head{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+  .host-head .name{font-family:var(--crt);font-size:30px;color:var(--ok);text-shadow:0 0 10px var(--ok-soft);line-height:.9}
+  .host.offline .host-head .name{color:var(--crit);text-shadow:0 0 10px var(--crit-soft)}
+  .host-head .url{font-size:10px;color:var(--dimmer);letter-spacing:1px}
+  .led{width:9px;height:9px;border-radius:50%;background:var(--crit);box-shadow:0 0 8px var(--crit)}
+  .led.up{background:var(--ok);box-shadow:0 0 10px var(--ok);animation:pulse 2.2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  .led.na{background:var(--dimmer);box-shadow:none}
+  .svcs{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:10px;letter-spacing:1px;color:var(--dim)}
+  .host > .svcs{margin-top:10px}
+  .svcs .s{display:inline-flex;align-items:center;gap:5px}
+  .svcs .s.down{color:var(--crit)}
+  .host-meta{margin-left:auto;text-align:right;font-size:10px;color:var(--dim);letter-spacing:1px}
+
+  .section{margin-top:16px}
+  .section > h3{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--dim);margin:0 0 8px;
+    display:flex;align-items:center;gap:10px}
+  .section > h3::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--panel-edge),transparent)}
+  .section.empty{display:none}
+
+  .grid{display:grid;gap:10px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:520px){.g3,.g2{grid-template-columns:1fr}}
+
+  .card{position:relative;background:var(--panel);border:1px solid var(--panel-edge);border-radius:4px;
+    padding:10px 11px 8px;overflow:hidden;box-shadow:0 0 0 1px #000 inset;animation:rise .4s both}
+  @keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+  .card .label{font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);
+    display:flex;justify-content:space-between;gap:6px}
+  .readout{display:flex;align-items:baseline;gap:5px;margin-top:5px}
+  .readout .num{font-family:var(--crt);font-size:34px;line-height:.85;color:var(--ink)}
+  .readout .unit{font-size:12px;color:var(--dim)}
+  .readout .sub{margin-left:auto;font-size:10px;color:var(--dim);align-self:flex-end;text-align:right}
+  .card.hero .readout .num{font-size:46px}
+  .spark{display:block;width:100%;height:38px;margin-top:6px}
+  .card.hero .spark{height:50px}
+  .bar{height:8px;border-radius:2px;background:#0a120c;border:1px solid var(--panel-edge);margin-top:7px;overflow:hidden}
+  .bar > i{display:block;height:100%;width:0;background:var(--ok);box-shadow:0 0 12px var(--ok-soft);transition:width .4s,background .4s}
+  .s-ok .num{color:var(--ok);text-shadow:0 0 12px var(--ok-soft)}
+  .s-warn .num{color:var(--warn);text-shadow:0 0 12px var(--warn-soft)}
+  .s-crit .num{color:var(--crit);text-shadow:0 0 12px var(--crit-soft)}
+  .net-rows{display:flex;gap:14px;margin-top:5px}
+  .net-rows .nr{display:flex;align-items:baseline;gap:5px}
+  .net-rows .nr .a{font-family:var(--crt);font-size:26px;line-height:.85}
+  .net-rows .nr.down .a{color:var(--ok)} .net-rows .nr.up .a{color:var(--cyan)}
+  .net-rows .nr .u{font-size:10px;color:var(--dim)}
+
+  .note{font-size:11px;color:var(--dim);padding:8px 4px}
+  .banner{display:none;margin-top:10px;border:1px solid var(--crit);background:var(--crit-soft);color:var(--crit);
+    padding:9px 12px;border-radius:4px;font-size:11.5px;letter-spacing:.5px}
+  .host.offline .banner{display:block}
+  footer{margin-top:30px;color:var(--dimmer);font-size:10.5px;letter-spacing:1px;text-align:center}
+  footer code{color:var(--dim)}
+  .cfgrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .cfg{appearance:none;background:#0a120c;border:1px solid var(--panel-edge);color:var(--dim);
+    font-family:var(--mono);font-size:11px;padding:6px 8px;border-radius:3px;min-width:240px}
+  .cfg:focus{outline:none;border-color:var(--ok);color:var(--ink)}
+  .svcrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .svc{display:flex;align-items:center;gap:10px;border:1px solid var(--panel-edge);background:var(--panel);
+    border-radius:4px;padding:7px 12px;box-shadow:0 0 0 1px #000 inset}
+  .svc .name{font-family:var(--crt);font-size:24px;line-height:.9;color:var(--ok)}
+  .svc.down .name{color:var(--crit)}
+  .svc .sub{font-size:10px;color:var(--dim);letter-spacing:1px}
+
+  /* ---- kiosk view (?kiosk): 7" display, 1280x720, no scrolling ---- */
+  .ov{display:none}
+  body.kiosk{overflow:hidden;cursor:none;user-select:none}
+  /* passively cooled Pi: no full-screen blend overlay, endless animation or blurred glow, so the page only repaints on new data */
+  body.kiosk{background-attachment:scroll} body.kiosk::after{display:none} body.kiosk .led.up{animation:none}
+  body.kiosk *{text-shadow:none!important;box-shadow:none!important}
+  body.kiosk .wrap{max-width:none;height:100vh;padding:10px 12px;display:flex;flex-direction:column}
+  body.kiosk .cfgrow,body.kiosk footer{display:none}
+  body.kiosk header{padding:8px 14px}
+  body.kiosk .title{font-size:30px}
+  body.kiosk .svcrow{margin-top:8px;gap:8px}
+  body.kiosk .svc{padding:5px 10px;flex:1 1 0}
+  /* fixed to the space left on screen: a canvas keeps its last drawn size, so a content-sized row could only grow (see .t-spark) */
+  body.kiosk .ov{display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:minmax(0,1fr);gap:10px;margin-top:10px;flex:1 1 0;min-height:0}
+  body.kiosk .cols{display:block;margin-top:8px}
+  body.kiosk .host{display:none}
+  body.kiosk.detail .ov,body.kiosk.detail .svcrow{display:none}
+  body.kiosk.detail .host.sel{display:block;padding:10px 12px}
+  body.kiosk .host > div:last-child{display:flex;flex-wrap:wrap;gap:0 16px}
+  body.kiosk .host .section{margin-top:8px}
+  body.kiosk .host .grid{display:flex;flex-wrap:wrap;gap:8px}
+  body.kiosk .host .card{width:196px;padding:8px 10px 6px}
+  body.kiosk .host .spark{height:28px}
+  .tile{border:1px solid var(--panel-edge);border-radius:5px;background:linear-gradient(180deg,#0a110c,#080d0a);
+    padding:12px;display:flex;flex-direction:column;gap:6px;box-shadow:0 0 0 1px #000 inset}
+  .tile.s-warn{border-color:var(--warn)} .tile.s-crit{border-color:var(--crit)}
+  .tile.offline{opacity:.55;border-color:var(--crit)}
+  .tile .t-head{display:flex;align-items:center;gap:8px}
+  .tile .t-head .name{font-family:var(--crt);font-size:28px;line-height:.9;color:var(--ok)}
+  .tile.offline .t-head .name{color:var(--crit)}
+  .tile .t-row{display:flex;align-items:baseline;justify-content:space-between}
+  .tile .t-row .k{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--dim)}
+  .tile .t-row .v{font-family:var(--crt);font-size:46px;line-height:.9;color:var(--ink)}
+  .tile .t-row .v.s-ok{color:var(--ok)} .tile .t-row .v.s-warn{color:var(--warn)} .tile .t-row .v.s-crit{color:var(--crit)}
+  .tile .t-rows{display:flex;flex-direction:column;gap:6px}
+  /* basis 0: the height comes from the free space, never from the size spark() last gave the canvas */
+  .tile .t-spark{display:block;width:100%;flex:1 1 0;min-height:0;margin-top:6px}
+  .tile .t-alert{font-size:11px;letter-spacing:1px;color:var(--dim)}
+  .tile.s-warn .t-alert{color:var(--warn)} .tile.s-crit .t-alert,.tile.offline .t-alert{color:var(--crit)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title" id="title">infra<small>host telemetria · netdata feed</small></div>
+    <div class="spacer"></div>
+    <div class="stat"><span class="k">helyi idő</span><span class="v" id="clock">--:--:--</span></div>
+  </header>
+
+  <div class="svcrow" id="svcrow"></div>
+  <div class="ov" id="ov"></div>
+
+  <div class="cols" id="cols"></div>
+
+  <div class="cfgrow" id="cfgrow"></div>
+
+  <footer>
+    /api/v1/data · auto-discovery /api/v1/charts · frissítés <span id="footInt"></span>s ·
+    URL felülírás: <code id="footOv"></code>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   CONFIG: everything site-specific is in this block
+   ============================================================ */
+const CONFIG = {
+  /* header and tab title */
+  title: "home infra",
+
+  /* Netdata agents: one column (and one kiosk tile) each. key = display name and URL override parameter
+     (?node1=http://10.0.0.5:19999). Plain IPs work over a VPN without the LAN DNS.
+     only (optional): show just the charts matching this regex, and leave them out of every other host. For a
+     device without Netdata that an agent polls over SNMP: {key:"nas", base:<that agent>, only:/^snmp_nas\./}
+     (README, "Devices without Netdata: SNMP"). */
+  hosts: [
+    {key:"node1", base:"http://node1.example.lan:19999"},
+    {key:"node2", base:"http://node2.example.lan:19999"},
+    {key:"pi",    base:"http://pi.example.lan:19999"},
+  ],
+
+  /* reachability only, for machines without Netdata: measured by the go.d ping job of the FIRST host above.
+     host = the address exactly as in the ping job (chart ID ping_<job>.host_packet_loss_192_0_2_10) */
+  pings: [
+    {key:"mail", host:"192.0.2.10"},
+    {key:"pbx",  host:"192.0.2.11"},
+    {key:"dns1", host:"192.0.2.12"},
+  ],
+
+  /* mount points shown under Tárhely besides / (Netdata chart disk_space.<mount>) */
+  mounts: ["/var", "/opt"],
+
+  /* per-host threshold overrides: host key -> {card label: [warn, crit]} */
+  hostThresholds: {
+    node1: {"CPU csomag hőfok":[72,82]},
+    pi:    {"Rendszer":[65,80]},
+  },
+
+  /* systemd service LEDs on one host's column / tile: [label, unit name without .service]
+     (Netdata systemdunits charts) */
+  serviceHost: "pi",
+  services: [["nginx","nginx"], ["SMB","smbd"], ["VPN","wg-quick@wg0"], ["tűzfal","nftables"]],
+
+  /* refresh intervals (ms). Every tick asks each Netdata agent for the latest point of each card;
+     the kiosk polls less often because a passively cooled Pi renders the page on the CPU */
+  refreshMs: 2000,
+  kioskRefreshMs: 5000,
+  serviceMs: 30000,  /* service LEDs */
+  pageMs: 20000,     /* kiosk: page rotation */
+  idleMs: 60000,     /* kiosk: no rotation for this long after a tap */
+};
+
+const qp = new URLSearchParams(location.search);
+const HOSTS = CONFIG.hosts.map(h=>Object.assign({}, h, {base:(qp.get(h.key) || h.base).replace(/\/+$/,"")}));
+const ONLY_RE = HOSTS.filter(h=>h.only).map(h=>h.only);
+const PINGS = CONFIG.pings.map(p=>Object.assign({}, p));
+document.title = CONFIG.title+" // telemetria";
+document.getElementById("title").firstChild.textContent = CONFIG.title;
+/* sparkline history: HIST_N points over the last HIST_S seconds */
+const REFRESH_MS=qp.has("kiosk")?CONFIG.kioskRefreshMs:CONFIG.refreshMs, HIST_S=180, HIST_N=90;
+document.getElementById("footInt").textContent=REFRESH_MS/1000;
+
+/* ============================================================
+   REDUCERS / FORMATTERS
+   ============================================================ */
+const first = (L,r)=> r[1];
+const sumAll= (L,r)=>{let s=0;for(let i=1;i<r.length;i++)s+=(+r[i]||0);return s;};
+const named = (n)=>(L,r)=>{const i=L.indexOf(n);return i>0?(+r[i]||0):null;};
+const usedAbs=(L,r)=>{const i=L.indexOf("used");return i>0?(+r[i]||0):null;};
+const totalAbs=(L,r)=>sumAll(L,r);
+const usedPct=(L,r)=>{const u=usedAbs(L,r),t=totalAbs(L,r);return t?(u/t*100):0;};
+
+const f0=v=>(v==null||isNaN(v))?"–":Math.round(v).toString();
+const f2=v=>(v==null||isNaN(v))?"–":v.toFixed(2);
+const gibMiB=m=>m==null||isNaN(m)?"–":(m>=1024?(m/1024).toFixed(1)+" GiB":Math.round(m)+" MiB");
+const gibGiB=g=>g==null||isNaN(g)?"–":g.toFixed(1)+" GiB";
+/* unit-aware human size: converts from the unit Netdata declares (bytes/KiB/MiB/GiB/TiB) to a readable size */
+function humanSize(v,units){
+  if(v==null||isNaN(v))return"–";
+  const U=(units||"").toLowerCase();
+  let bytes;
+  if(U==="bytes"||U==="b"||U==="by")bytes=v;
+  else if(U==="kib")bytes=v*1024;
+  else if(U==="mib")bytes=v*1048576;
+  else if(U==="gib")bytes=v*1073741824;
+  else if(U==="tib")bytes=v*1099511627776;
+  else return (Math.abs(v)>=100?Math.round(v):v.toFixed(1))+" "+(units||"");
+  const u=["B","KiB","MiB","GiB","TiB"];let i=0;
+  while(bytes>=1024&&i<u.length-1){bytes/=1024;i++;}
+  return (bytes>=100?Math.round(bytes):bytes.toFixed(1))+" "+u[i];
+}
+const rateKiB=k=>k==null||isNaN(k)?"–":(k>=1024?(k/1024).toFixed(1)+" MiB/s":Math.round(k)+" KiB/s");
+function kbits(kb){if(kb==null||isNaN(kb))return"0";const v=Math.abs(kb);
+  if(v>=1e6)return(v/1e6).toFixed(2)+" Gb/s";if(v>=1e3)return(v/1e3).toFixed(1)+" Mb/s";return Math.round(v)+" kb/s";}
+
+function stateOf(v,th){if(!th||v==null||isNaN(v))return"";if(v>=th[1])return"crit";if(v>=th[0])return"warn";return"ok";}
+const STROKE={ok:"#46f08a",warn:"#ffb454",crit:"#ff5c5c","":"#46f08a"};
+
+/* ============================================================
+   DISCOVERY RULES (per host, from the chart list)
+   Every template carries the section, the card look and a resolve(ids)->id|null function.
+   ============================================================ */
+const find = (ids,re)=> ids.find(x=>re.test(x)) || null;
+const nth  = (ids,re,n)=> ids.filter(x=>re.test(x)).sort()[n] || null;
+/* smartctl chart ID: smartctl.device_<dev>_type_<type>_temperature (NVMe excluded, it has its own card) */
+const SMART_T = /^smartctl\.device_(?!nvme)[^_]+_type_.*_temperature$/;
+const smartDev = id=>(id.match(/device_([^_]+)/)||[])[1]||id;
+/* go.d lvm: thin pool data usage,
+   e.g. lvm.lv_data-thin_vg_vg-data_lv_data_space_utilization (its _lv_metadata_ pair is left out) */
+const LVM_D = /^lvm\.lv_.+_vg_.+_lv_data_space_utilization$/;
+const lvmName = id=>{const m=id.match(/^lvm\.lv_(.+)_vg_(.+)_lv_data_space_utilization$/);return m?m[2]+"/"+m[1]:id;};
+
+const TEMPLATES = [
+  // ---- CPU ----
+  {sec:"CPU", label:"CPU kihasználtság", unit:"%", kind:"gauge", val:sumAll, fmt:f0, th:[80,95],
+    resolve:ids=>ids.includes("system.cpu")?"system.cpu":null},
+  {sec:"CPU", label:"Terhelés (1p)", unit:"", kind:"gauge", val:named("load1"), fmt:f2,
+    resolve:ids=>ids.includes("system.load")?"system.load":null},
+  {sec:"CPU", label:"CPU csomag hőfok", unit:"°C", kind:"gauge", val:first, fmt:f0, th:[70,90],
+    resolve:ids=> find(ids,/^sensors\.temperature_coretemp-.*[Pp]ackage.*_input$/)
+                || find(ids,/^sensors\.temperature_k10temp-.*(Tctl|Tdie).*_input$/i)
+                || find(ids,/^sensors\.temperature_cpu_thermal.*_input$/) /* RPi SoC thermal zone */},
+
+  // ---- memory ----
+  {sec:"Memória", label:"RAM", kind:"bar", val:usedPct, used:usedAbs, total:totalAbs, srcUnit:"MiB", th:[85,95],
+    resolve:ids=>ids.includes("system.ram")?"system.ram":null},
+  {sec:"Memória", label:"Swap", kind:"bar", val:usedPct, used:usedAbs, total:totalAbs, srcUnit:"MiB", th:[25,60],
+    resolve:ids=>ids.includes("mem.swap")?"mem.swap":null},
+
+  // ---- temperatures ----
+  {sec:"Hőmérsékletek", label:"CPU (PECI)", unit:"°C", kind:"gauge", val:first, fmt:f0, th:[70,90],
+    resolve:ids=> find(ids,/^sensors\.temperature_.*PECI.*_input$/i) || find(ids,/^sensors\.temperature_.*Tctl.*_input$/i)},
+  {sec:"Hőmérsékletek", label:"Rendszer", unit:"°C", kind:"gauge", val:first, fmt:f0, th:[55,70],
+    resolve:ids=> find(ids,/^sensors\.temperature_.*SYSTIN.*_input$/) || find(ids,/^sensors\.temperature_acpitz.*temp1.*_input$/)
+                || find(ids,/^sensors\.temperature_rp1_adc.*_input$/) /* Pi5 RP1 southbridge ADC temp (not the voltage charts) */},
+  {sec:"Hőmérsékletek", label:"NVMe", unit:"°C", kind:"gauge", val:first, fmt:f0, th:[60,75],
+    resolve:ids=> find(ids,/^sensors\.temperature_nvme-.*Composite.*_input$/) || find(ids,/^smartctl\..*nvme.*temperature$/i)},
+  {sec:"Hőmérsékletek", label:"Lemez", unit:"°C", kind:"gauge", val:first, fmt:f0, th:[50,58],
+    resolve:ids=>nth(ids,SMART_T,0), dynName:smartDev},
+  {sec:"Hőmérsékletek", label:"Lemez", unit:"°C", kind:"gauge", val:first, fmt:f0, th:[50,58],
+    resolve:ids=>nth(ids,SMART_T,1), dynName:smartDev},
+
+  // ---- storage ----
+  ...["/", ...CONFIG.mounts].map(mnt=>(
+  {sec:"Tárhely", label:mnt==="/"?"Gyökér /":mnt, kind:"bar", val:usedPct, used:usedAbs, total:totalAbs, srcUnit:"GiB", th:[80,92],
+    resolve:ids=>ids.includes("disk_space."+mnt)?"disk_space."+mnt:null})),
+  {sec:"Tárhely", label:"LVM thin", unit:"%", kind:"gauge", val:first, fmt:f0, th:[80,92],
+    resolve:ids=>nth(ids,LVM_D,0), dynName:lvmName},
+  {sec:"Tárhely", label:"LVM thin", unit:"%", kind:"gauge", val:first, fmt:f0, th:[80,92],
+    resolve:ids=>nth(ids,LVM_D,1), dynName:lvmName},
+
+  // ---- network ----
+  {sec:"Hálózat", label:"LAN", kind:"net", dynName:id=>id.replace(/^net\./,""),
+    resolve:ids=>["net.vmbr0","net.eth0"].find(x=>ids.includes(x))
+                || ids.find(x=>/^net\.[^.]+$/.test(x) && x!=="net.lo" && !/^net\.(tap|fwbr|fwpr|fwln|veth|wg)/.test(x)) || null},
+  {sec:"Hálózat", label:"Összes interfész", kind:"net",
+    resolve:ids=>ids.includes("system.net")?"system.net":null},
+];
+
+const SECTION_ORDER=["CPU","Memória","Hőmérsékletek","Tárhely","Hálózat"];
+const SECTION_GRID ={CPU:"g3","Memória":"g2","Hőmérsékletek":"g3","Tárhely":"g3","Hálózat":"g2"};
+const HOST_TH = CONFIG.hostThresholds;
+
+/* ============================================================
+   DOM
+   ============================================================ */
+const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
+
+function buildHostShell(H){
+  const root=el("div","host"); H.root=root;
+  const head=el("div","host-head");
+  const led=el("span","led"); H.led=led;
+  const nm=el("div","name",H.key);
+  const url=el("div","url",H.base.replace(/^https?:\/\//,""));
+  const wrapName=el("div"); wrapName.appendChild(nm); wrapName.appendChild(url);
+  const meta=el("div","host-meta","–"); H.meta=meta;
+  head.appendChild(led); head.appendChild(wrapName); head.appendChild(meta);
+  root.appendChild(head);
+  const banner=el("div","banner","⚠ Nincs kapcsolat — ellenőrizd, hogy fut-e a netdata és helyes-e az URL.");
+  root.appendChild(banner);
+  H.body=el("div"); root.appendChild(H.body);
+  document.getElementById("cols").appendChild(root);
+}
+
+function buildCard(m){
+  const c=el("div","card"+(m.hero?" hero":""));
+  c.appendChild(el("div","label","<span>"+m.label+"</span><span></span>"));
+  if(m.kind==="net"){
+    const rows=el("div","net-rows");
+    rows.innerHTML='<div class="nr down"><span class="u">↓</span><span class="a" data-down>–</span></div>'
+                  +'<div class="nr up"><span class="u">↑</span><span class="a" data-up>–</span></div>';
+    c.appendChild(rows);
+  }else{
+    c.appendChild(el("div","readout",'<span class="num" data-num>–</span><span class="unit">'+(m.unit||"")+'</span><span class="sub" data-sub></span>'));
+    if(m.kind==="bar"){const b=el("div","bar");b.innerHTML='<i data-fill></i>';c.appendChild(b);}
+  }
+  const cv=el("canvas","spark");c.appendChild(cv);c._cv=cv;
+  return c;
+}
+
+/* build the resolved card set for a host after discovery */
+function buildHostCards(H, ids, charts){
+  H.body.innerHTML="";
+  H.metrics=[];
+  for(const sec of SECTION_ORDER){
+    const secEl=el("div","section");
+    secEl.appendChild(el("h3",null,sec));
+    const grid=el("div","grid "+(SECTION_GRID[sec]||"g3"));
+    let count=0;
+    for(const t of TEMPLATES){
+      if(t.sec!==sec) continue;
+      const id=t.resolve(ids);
+      if(!id) continue;
+      const m=Object.assign({},t,{id, units:(charts&&charts[id]&&charts[id].units)||t.srcUnit});
+      const hostTh=(HOST_TH[H.key]||{})[t.label];
+      if(hostTh) m.th=hostTh;
+      const card=buildCard(m);
+      if(m.dynName){ // show device / interface name in label
+        card.querySelector(".label span:first-child").textContent=m.label?m.label+" ("+m.dynName(id)+")":m.dynName(id);
+      }
+      grid.appendChild(card);
+      H.metrics.push({m,card,
+        num:card.querySelector("[data-num]"),sub:card.querySelector("[data-sub]"),
+        fill:card.querySelector("[data-fill]"),down:card.querySelector("[data-down]"),
+        up:card.querySelector("[data-up]"),cv:card._cv});
+      count++;
+    }
+    if(count===0) secEl.classList.add("empty");
+    secEl.appendChild(grid);
+    H.body.appendChild(secEl);
+  }
+  if(H.metrics.length===0){
+    H.body.appendChild(el("div","note","Nem található ismert chart ezen a hoszton. (A netdata fut, de a metrika-nevek eltérhetnek — küldd el a charts-listát és bővítem a felderítőt.)"));
+  }
+}
+
+/* ============================================================
+   CANVAS
+   ============================================================ */
+function spark(cv,series,color,opts){
+  opts=opts||{};const dpr=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;
+  if(!w||!h)return;
+  if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+  const ctx=cv.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+  const data=series.filter(v=>v!=null&&!isNaN(v));if(data.length<2)return;
+  let lo=Math.min(...data),hi=Math.max(...data);
+  if(opts.min!=null)lo=Math.min(lo,opts.min);if(opts.max!=null)hi=Math.max(hi,opts.max);
+  if(hi-lo<1e-6)hi=lo+1;
+  const pad=4,X=i=>pad+i*(w-2*pad)/(series.length-1),Y=v=>h-pad-(v-lo)*(h-2*pad)/(hi-lo);
+  ctx.beginPath();let st=false;
+  series.forEach((v,i)=>{if(v==null||isNaN(v))return;const x=X(i),y=Y(v);st?ctx.lineTo(x,y):(ctx.moveTo(x,y),st=true);});
+  ctx.lineTo(X(series.length-1),h-pad);ctx.lineTo(X(0),h-pad);ctx.closePath();
+  const g=ctx.createLinearGradient(0,0,0,h);g.addColorStop(0,color+"33");g.addColorStop(1,color+"00");ctx.fillStyle=g;ctx.fill();
+  ctx.beginPath();st=false;
+  series.forEach((v,i)=>{if(v==null||isNaN(v))return;const x=X(i),y=Y(v);st?ctx.lineTo(x,y):(ctx.moveTo(x,y),st=true);});
+  ctx.strokeStyle=color;ctx.lineWidth=1.6;ctx.lineJoin="round";ctx.stroke();
+  const lv=data[data.length-1];ctx.beginPath();ctx.arc(X(series.length-1),Y(lv),2.1,0,7);ctx.fillStyle=color;ctx.fill();
+}
+function sparkDual(cv,s1,s2,c1,c2){
+  const dpr=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;
+  if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+  const ctx=cv.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+  const all=[...s1,...s2].filter(v=>v!=null&&!isNaN(v));if(all.length<2)return;
+  let lo=Math.min(0,...all),hi=Math.max(...all);if(hi-lo<1e-6)hi=lo+1;
+  const pad=4,X=i=>pad+i*(w-2*pad)/(s1.length-1),Y=v=>h-pad-(v-lo)*(h-2*pad)/(hi-lo);
+  [[s1,c1],[s2,c2]].forEach(([s,c])=>{ctx.beginPath();let st=false;
+    s.forEach((v,i)=>{if(v==null||isNaN(v))return;const x=X(i),y=Y(v);st?ctx.lineTo(x,y):(ctx.moveTo(x,y),st=true);});
+    ctx.strokeStyle=c;ctx.lineWidth=1.5;ctx.lineJoin="round";ctx.stroke();});
+}
+
+/* ============================================================
+   FETCH
+   ============================================================ */
+/* full=false: only the latest point (same averaging window as the last point of the full series) */
+function dataUrl(H,id,full){
+  return H.base+"/api/v1/data?chart="+encodeURIComponent(id)+"&after=-"+(full?HIST_S:Math.round(HIST_S/HIST_N))+"&points="+(full?HIST_N:1)+"&group=average&format=json";}
+/* history is only fetched where a sparkline is visible: everywhere outside the kiosk, in the kiosk the open host
+   page and the CPU curve of the overview tiles */
+const needHist=(H,m)=>!KIOSK||page===HOSTS.indexOf(H)+1||CPU_LABELS.includes(m.label);
+async function getJSON(u,ms){const ctrl=new AbortController(),t=setTimeout(()=>ctrl.abort(),ms||4000);
+  try{const r=await fetch(u,{signal:ctrl.signal,cache:"no-store"});clearTimeout(t);if(!r.ok)return{__err:r.status};return await r.json();}
+  catch(e){clearTimeout(t);return{__err:String(e.name||e)};}}
+
+async function discover(H){
+  const j=await getJSON(H.base+"/api/v1/charts",5000);
+  if(j.__err||!j.charts){return false;}
+  H.ids=Object.keys(j.charts).filter(id=>H.only?H.only.test(id):!ONLY_RE.some(r=>r.test(id)));
+  buildHostCards(H,H.ids,j.charts);
+  H.ready=true;
+  return true;
+}
+
+async function pollHost(H){
+  if(!H.ready){ const ok=await discover(H); setLed(H,ok); if(!ok)return; }
+  let anyOK=false;
+  await Promise.all(H.metrics.map(async C=>{
+    const m=C.m,full=needHist(H,m);
+    const j=await getJSON(dataUrl(H,m.id,full));
+    if(j.__err||!j.labels||!j.data||!j.data.length)return;
+    anyOK=true;
+    const L=j.labels,rows=j.data,latest=rows[0],ordered=[...rows].reverse();
+    if(m.kind==="net"){
+      /* Netdata net.*: received/sent in kbit/s */
+      const di=L.indexOf("received"),si=L.indexOf("sent");
+      const rv=(r,i)=>i>0?Math.abs(+r[i]||0):0;
+      C.down.textContent=kbits(rv(latest,di));
+      C.up.textContent  =kbits(rv(latest,si));
+      sparkDual(C.cv,ordered.map(r=>rv(r,di)),ordered.map(r=>rv(r,si)),STROKE.ok,"#5cd6ff");
+      return;
+    }
+    const cur=m.val(L,latest),st=stateOf(cur,m.th);
+    C.cur=cur;C.st=st;C.hist=ordered.map(r=>m.val(L,r));
+    C.card.classList.remove("s-ok","s-warn","s-crit");if(st)C.card.classList.add("s-"+st);
+    if(m.kind==="bar"){
+      const u=m.used(L,latest),tot=m.total(L,latest);
+      C.num.textContent=f0(cur)+"%";
+      C.sub.textContent=humanSize(u,m.units)+" / "+humanSize(tot,m.units);
+      if(C.fill){C.fill.style.width=Math.max(0,Math.min(100,cur))+"%";C.fill.style.background=STROKE[st||"ok"];C.fill.style.boxShadow="0 0 12px "+STROKE[st||"ok"]+"55";}
+      spark(C.cv,ordered.map(r=>m.val(L,r)),STROKE[st||"ok"],{min:0,max:100});
+    }else{
+      C.num.textContent=(m.fmt||f0)(cur);
+      spark(C.cv,ordered.map(r=>m.val(L,r)),STROKE[st||"ok"],{});
+    }
+  }));
+  setLed(H,anyOK);
+  if(anyOK){H.lastOK=Date.now();H.meta.textContent=H.metrics.length+" metrika · él";}
+  if(KIOSK)updateTile(H);
+}
+
+function setLed(H,ok){
+  if(ok){H.led.classList.add("up");H.root.classList.remove("offline");}
+  else if(!H.lastOK || Date.now()-H.lastOK>3*REFRESH_MS){H.led.classList.remove("up");H.root.classList.add("offline");H.meta.textContent="offline";}
+}
+
+/* ============================================================
+   START
+   ============================================================ */
+HOSTS.forEach(buildHostShell);
+/* base URL inputs below the columns: Enter switches the host to the typed URL */
+HOSTS.forEach(H=>{
+  const inp=el("input","cfg");inp.spellcheck=false;inp.title=H.key+" base URL — Enter";inp.value=H.base;
+  inp.addEventListener("keydown",e=>{if(e.key!=="Enter")return;
+    H.base=inp.value.replace(/\/+$/,"");H.ready=false;H.lastOK=0;
+    H.root.querySelector(".url").textContent=H.base.replace(/^https?:\/\//,"");pollHost(H);});
+  document.getElementById("cfgrow").appendChild(inp);
+});
+document.getElementById("footOv").textContent="?"+HOSTS.map(H=>H.key+"=http://ip:19999").join("&");
+
+/* ping row: from the chart list the first host (HOSTS[0]) discovered */
+PINGS.forEach(P=>{
+  const s=el("div","svc down");
+  s.innerHTML='<span class="led"></span><div><div class="name"></div><div class="sub"></div></div>';
+  s.querySelector(".name").textContent=P.key;
+  P.root=s;P.led=s.querySelector(".led");P.sub=s.querySelector(".sub");P.sub.textContent=P.host+" · –";
+  document.getElementById("svcrow").appendChild(s);
+});
+function setPing(P,up,txt){P.led.classList.toggle("up",up);P.root.classList.toggle("down",!up);P.sub.textContent=P.host+" · "+txt;}
+async function pollPing(P){
+  const H=HOSTS[0];
+  if(!H.ready){setPing(P,false,"nincs adat ("+H.key+")");return;}
+  const h=P.host.replace(/\./g,"_");
+  const lossId=find(H.ids,new RegExp("^ping[^.]*\\.host_packet_loss_"+h+"$"));
+  const rttId =find(H.ids,new RegExp("^ping[^.]*\\.host_rtt_"+h+"$"));
+  if(!lossId){setPing(P,false,"nincs ping chart");return;}
+  const u=id=>H.base+"/api/v1/data?chart="+encodeURIComponent(id)+"&after=-15&points=1&group=average&format=json";
+  const [lj,rj]=await Promise.all([getJSON(u(lossId)),rttId?getJSON(u(rttId)):null]);
+  if(lj.__err||!lj.data||!lj.data.length||lj.data[0][1]==null){setPing(P,false,"nincs adat");return;}
+  const loss=+lj.data[0][1];
+  if(loss>=100){setPing(P,false,"offline");return;}
+  const rtt=rj&&!rj.__err&&rj.data&&rj.data.length?named("avg")(rj.labels,rj.data[0]):null;
+  setPing(P,true,"online"+(rtt!=null?" · "+rtt.toFixed(1)+" ms":"")+(loss>0?" · "+f0(loss)+"% veszteség":""));
+}
+
+/* ============================================================
+   KIOSK (?kiosk): 7" 1280x720 touch display (see kiosk/ in this repository).
+   Pages: 0 = overview (host tiles, ping row), 1..n = one host's full column.
+   Pages rotate every CONFIG.pageMs; a tap on a tile opens that host, a tap anywhere else goes back to the
+   overview. Rotation resumes CONFIG.idleMs after the last tap.
+   Every tap asks infra-kiosk-helper for full brightness; a tap on the dark (night) screen only wakes it.
+   ============================================================ */
+const KIOSK=qp.has("kiosk");
+const PAGE_MS=CONFIG.pageMs, IDLE_MS=CONFIG.idleMs, STATE_MS=5000;
+const CPU_LABELS=["CPU kihasználtság"];
+let page=0, lastTap=0, dark=false;
+/* names of the services on CONFIG.serviceHost that are not running, filled by pollServices */
+let svcDown=[];
+/* tile rows: [label, template labels, format]; a row appears only if the host has one of the metrics */
+const pct=v=>f0(v)+"%";
+const TILE_ROWS=[
+  ["terhelés",    ["Terhelés (1p)"],              f2],
+  ["CPU",         CPU_LABELS,                     pct],
+  ["RAM",         ["RAM"],                        pct],
+  ["CPU °C",      ["CPU csomag hőfok"],           f0],
+  ["rendszer °C", ["Rendszer"],                   f0],
+];
+
+function buildTile(H,i){
+  const t=el("div","tile");t.dataset.page=i+1;
+  t.innerHTML='<div class="t-head"><span class="led"></span><span class="name">'+H.key+'</span></div>'
+    +'<div class="t-rows"></div>'
+    +'<canvas class="t-spark"></canvas>'
+    +'<div class="t-alert" data-alert>–</div>';
+  H.tile={root:t,led:t.querySelector(".led"),rows:t.querySelector(".t-rows"),cells:[],
+    alert:t.querySelector("[data-alert]"),cv:t.querySelector(".t-spark")};
+  document.getElementById("ov").appendChild(t);
+}
+/* (re)build the rows once per discovery (buildHostCards makes a new H.metrics array) */
+function buildTileRows(T,metrics){
+  T.builtFor=metrics;T.cells=[];T.rows.innerHTML="";
+  for(const [k,labels,fmt] of TILE_ROWS){
+    const C=metrics.find(C=>labels.includes(C.m.label));if(!C)continue;
+    const r=el("div","t-row",'<span class="k">'+k+'</span><span class="v">–</span>');
+    T.rows.appendChild(r);T.cells.push({C,fmt,node:r.lastChild});
+  }
+}
+function setTileVal(node,C,fmt){
+  node.classList.remove("s-ok","s-warn","s-crit");
+  if(!C){node.textContent="–";return;}
+  node.textContent=fmt(C.cur);if(C.st)node.classList.add("s-"+C.st);
+}
+function updateTile(H){
+  const T=H.tile;if(!T)return;
+  const on=!H.root.classList.contains("offline"),ms=(H.metrics||[]).filter(C=>C.cur!=null);
+  if(H.metrics&&T.builtFor!==H.metrics)buildTileRows(T,H.metrics);
+  for(const x of T.cells)setTileVal(x.node,x.C.cur!=null?x.C:null,x.fmt);
+  const cpu=ms.find(C=>CPU_LABELS.includes(C.m.label));
+  if(cpu&&cpu.hist)spark(T.cv,cpu.hist,STROKE[cpu.st||"ok"],{min:0,max:25}); /* scale is at least 0-25 % so idle noise stays flat */
+  const nc=ms.filter(C=>C.st==="crit").length,nw=ms.filter(C=>C.st==="warn").length;
+  T.led.classList.toggle("up",on);T.root.classList.toggle("offline",!on);
+  const down=H===SVC_HOST?svcDown:[];
+  T.root.classList.remove("s-ok","s-warn","s-crit");T.root.classList.add(nc||down.length?"s-crit":nw?"s-warn":"s-ok");
+  T.alert.textContent=!on?"offline":down.length?"áll: "+down.join(", "):nc?nc+" kritikus":nw?nw+" figyelmeztetés":"minden rendben";
+}
+
+/* the helper reports the backlight level, so a tap on the dark screen only wakes it */
+async function pollState(){const j=await getJSON("/api/state",3000);if(!j.__err)dark=j.pct===0;}
+
+function showPage(p){
+  page=(p+HOSTS.length+1)%(HOSTS.length+1);
+  document.body.classList.toggle("detail",page>0);
+  HOSTS.forEach((H,i)=>H.root.classList.toggle("sel",i===page-1));
+  if(page>0&&HOSTS[page-1].ready)pollHost(HOSTS[page-1]); /* fill the sparklines now, not at the next tick */
+}
+function wake(){fetch("/api/wake",{method:"POST"}).catch(()=>{});}
+
+if(KIOSK){
+  document.body.classList.add("kiosk");
+  document.getElementById("ov").style.gridTemplateColumns="repeat("+HOSTS.length+",1fr)";
+  HOSTS.forEach(buildTile);
+  showPage(0);
+  document.addEventListener("click",e=>{
+    lastTap=Date.now();
+    if(dark){dark=false;wake();return;}
+    wake();
+    const tile=e.target.closest(".tile");
+    showPage(tile?+tile.dataset.page:0);
+  });
+  document.addEventListener("contextmenu",e=>e.preventDefault());
+  setInterval(()=>{if(Date.now()-lastTap>IDLE_MS)showPage(page+1);},PAGE_MS);
+  pollState();setInterval(pollState,STATE_MS);
+}
+
+/* service LEDs (CONFIG.serviceHost column, kiosk: its tile): state from the Netdata systemdunits charts.
+   A LED only says the unit is active, not that the service works. */
+const SVC_HOST=HOSTS.find(H=>H.key===CONFIG.serviceHost), SVC_MS=CONFIG.serviceMs;
+const SERVICES=CONFIG.services
+  .map(([name,unit])=>({name,id:"systemdunits_service-units.unit_"+unit+"_service_state"}));
+let svcPolled=0;
+function buildServices(){
+  if(!SVC_HOST)return;
+  const box=el("div","svcs");
+  for(const S of SERVICES){
+    S.root=el("span","s",'<span class="led na"></span>'+S.name);S.led=S.root.firstChild;
+    box.appendChild(S.root);
+  }
+  if(KIOSK)SVC_HOST.tile.root.insertBefore(box,SVC_HOST.tile.cv);
+  else SVC_HOST.root.insertBefore(box,SVC_HOST.root.querySelector(".banner"));
+}
+async function pollServices(){
+  const H=SVC_HOST;
+  if(!H||!H.ready||Date.now()-svcPolled<SVC_MS)return;
+  svcPolled=Date.now();
+  await Promise.all(SERVICES.map(async S=>{
+    const j=await getJSON(H.base+"/api/v1/data?chart="+encodeURIComponent(S.id)+"&after=-20&points=1&group=average&format=json");
+    const v=!j.__err&&j.data&&j.data.length?named("active")(j.labels,j.data[0]):null;
+    S.up=v==null?null:v>=0.5; /* null: no data, which says nothing about the service */
+    S.led.classList.toggle("na",S.up===null);S.led.classList.toggle("up",S.up===true);
+    S.root.classList.toggle("down",S.up===false);
+  }));
+  svcDown=SERVICES.filter(S=>S.up===false).map(S=>S.name);
+  if(KIOSK)updateTile(H);
+}
+buildServices();
+
+function loop(){HOSTS.forEach(pollHost);PINGS.forEach(pollPing);pollServices();}
+loop();setInterval(loop,REFRESH_MS);
+setInterval(()=>document.getElementById("clock").textContent=new Date().toLocaleTimeString("hu-HU"),1000);
+document.getElementById("clock").textContent=new Date().toLocaleTimeString("hu-HU");
+</script>
+</body>
+</html>

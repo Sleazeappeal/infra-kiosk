@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Local helper for the kiosk (listens on 127.0.0.1 only).
+
+- serves the dashboard files from WEB_ROOT
+- GET  /api/state : current backlight level, so the page knows whether the screen is dark
+- POST /api/wake  : full brightness for BOOST_S seconds (sent by the page on every tap)
+- backlight schedule: off between NIGHT_FROM and NIGHT_TO, DAY_PCT otherwise
+"""
+import glob
+import json
+import os
+import threading
+import time
+from datetime import datetime
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+LISTEN = ("127.0.0.1", 8090)
+WEB_ROOT = "/opt/infra-kiosk"
+DAY_PCT, BOOST_PCT = 50, 100
+NIGHT_FROM, NIGHT_TO = 22, 8  # local hours; display is off in between
+BOOST_S = 120
+# Set by infra-kiosk-ctl while the kiosk is stopped (night or pause): keep the screen dark, else the tty1 prompt shows
+OFF_FLAG = "/run/infra-kiosk-ctl/off"
+
+BL = next(iter(glob.glob("/sys/class/backlight/*")), None)
+lock = threading.Lock()
+boost_until = 0.0
+applied = None
+
+
+def target_pct():
+    if os.path.exists(OFF_FLAG):
+        return 0
+    if time.monotonic() < boost_until:
+        return BOOST_PCT
+    hour = datetime.now().hour
+    return 0 if (hour >= NIGHT_FROM or hour < NIGHT_TO) else DAY_PCT
+
+
+def write_bl(name, value):
+    with open(os.path.join(BL, name), "w") as f:
+        f.write(str(value))
+
+
+def apply_backlight():
+    global applied
+    if not BL:
+        return
+    with lock:
+        pct = target_pct()
+        if pct == applied:
+            return
+        try:
+            max_b = int(open(os.path.join(BL, "max_brightness")).read())
+            if pct == 0:
+                write_bl("brightness", 0)
+                write_bl("bl_power", 4)  # FB_BLANK_POWERDOWN
+            else:
+                write_bl("bl_power", 0)
+                write_bl("brightness", max(1, round(max_b * pct / 100)))
+            applied = pct
+            print(f"backlight {pct}%", flush=True)
+        except OSError as e:
+            print(f"backlight write failed: {e}", flush=True)
+
+
+def backlight_loop():
+    while True:
+        apply_backlight()
+        time.sleep(1)
+
+
+class Handler(SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    # Firefox would otherwise keep showing a cached dashboard across kiosk restarts after an update
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
+    def send_json(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path == "/api/state":
+            self.send_json(200, {"pct": target_pct()})
+        else:
+            super().do_GET()
+
+    def do_POST(self):
+        global boost_until
+        if self.path != "/api/wake":
+            self.send_json(404, {"error": "not found"})
+            return
+        was_dark = target_pct() == 0
+        boost_until = time.monotonic() + BOOST_S
+        apply_backlight()
+        self.send_json(200, {"wasDark": was_dark})
+
+
+if __name__ == "__main__":
+    print(f"backlight device: {BL or 'none'}", flush=True)
+    threading.Thread(target=backlight_loop, daemon=True).start()
+    ThreadingHTTPServer(LISTEN, partial(Handler, directory=WEB_ROOT)).serve_forever()

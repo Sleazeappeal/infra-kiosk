@@ -1,0 +1,41 @@
+#!/bin/sh
+# Sets the picture orientation and the matching touch calibration in one step, then restarts the kiosk.
+#   infra-kiosk-rotate normal|90|180|270            stock touch matrix for that rotation
+#   infra-kiosk-rotate 270 "0 1 0 -1 0 1"           with a measured matrix (README, "Touch calibration")
+set -eu
+
+DEFAULTS=/etc/default/infra-kiosk
+RULE=/etc/udev/rules.d/91-touch.rules
+
+# libinput calibration matrices (a b c d e f): 270 was measured on a 720x1280 portrait panel turned to
+# landscape, the others follow from it. A panel mounted differently may need a measured matrix.
+case "${1:-}" in
+    normal) m="1 0 0 0 1 0" ;;
+    90)     m="0 -1 1 1 0 0" ;;
+    180)    m="-1 0 1 0 -1 1" ;;
+    270)    m="0 1 0 -1 0 1" ;;
+    *)      sed -n '2,4p' "$0" >&2; exit 2 ;;
+esac
+m=${2:-$m}
+if ! echo "$m" | grep -Eq '^-?[0-9.]+( -?[0-9.]+){5}$'; then
+    echo "matrix must be 6 numbers, e.g. \"0 1 0 -1 0 1\"" >&2
+    exit 2
+fi
+
+if grep -q '^KIOSK_TRANSFORM=' "$DEFAULTS" 2>/dev/null; then
+    sed -i "s/^KIOSK_TRANSFORM=.*/KIOSK_TRANSFORM=$1/" "$DEFAULTS"
+else
+    echo "KIOSK_TRANSFORM=$1" >> "$DEFAULTS"
+fi
+
+cat > "$RULE" <<EOF
+# Written by infra-kiosk-rotate for KIOSK_TRANSFORM=$1. The touch controller reports raw panel coordinates and
+# cage only rotates the picture, so libinput maps every touch with this matrix.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHSCREEN}=="1", ENV{LIBINPUT_CALIBRATION_MATRIX}="$m"
+EOF
+
+udevadm control --reload
+udevadm trigger --subsystem-match=input --action=change
+# libinput reads the matrix when cage starts, so a running kiosk must restart to pick it up
+if systemctl is-active --quiet infra-kiosk; then systemctl restart infra-kiosk; fi
+echo "orientation $1, touch matrix $m"
