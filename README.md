@@ -18,6 +18,28 @@ This is a thin layer over other people's work:
 
 Thank you to all of them.
 
+## Requirements
+
+The kiosk setup (`kiosk/`) is built for one hardware combination, and that is the only one it was tested on:
+
+- **Raspberry Pi 5**
+- **Raspberry Pi Touch Display 2**: 7", 720x1280 portrait, on the Pi's DSI port, with a Goodix touch
+  controller. It is used in landscape (`KIOSK_TRANSFORM=270`).
+- **Raspberry Pi OS** based on Debian 13, with its `firefox` package, plus `cage` and `wlr-randr`
+- one or more **Netdata** agents that the Pi can reach on port 19999
+
+Several parts depend on this hardware:
+- the DSI output lookup and the rotation;
+- the Goodix module reload at start;
+- the backlight control through `/sys/class/backlight`;
+- the touch calibration matrices;
+- the Firefox CPU tuning for a passively cooled Pi.
+
+Other hardware will need changes in these places.
+
+The dashboard on its own (`dashboard/infra-dashboard.html`) has no hardware requirement. Any current browser
+that can reach the Netdata agents can show it.
+
 ## What it is
 
 One HTML file, [`dashboard/infra-dashboard.html`](dashboard/infra-dashboard.html), that reads a few Netdata
@@ -29,9 +51,8 @@ no framework and no backend for the data.
 - **Kiosk view** (`?kiosk`): a no-scroll layout for a 1280x720 touch screen. The overview shows one tile per
   host plus a ping row. The pages rotate on their own, and a tap on a tile opens that host's full column.
 
-The `kiosk/` folder turns a Raspberry Pi (or any Debian box) with a small touch display into an appliance
-that shows the kiosk view. It boots straight into the dashboard, needs no login, dims at night and wakes up
-on touch.
+The `kiosk/` folder turns a Raspberry Pi 5 with the Touch Display 2 into an appliance that shows the kiosk
+view. It boots straight into the dashboard, needs no login, dims at night and wakes up on touch.
 
 The UI labels are in Hungarian (`CPU kihasználtság` = CPU usage, `Hőmérsékletek` = temperatures,
 `Tárhely` = storage, `Hálózat` = network, `minden rendben` = all good). Code and comments are in English.
@@ -116,9 +137,7 @@ On the desktop the base URL inputs under the columns also switch a host (type th
 
 ## Kiosk setup
 
-Tested on a Raspberry Pi 5 running Raspberry Pi OS (Debian 13) with a 7" 720x1280 DSI panel with a Goodix
-touch controller. It uses the distribution's `firefox` package. On plain Debian, install `firefox-esr` and
-change `firefox` in `infra-kiosk-session` to `firefox-esr`. Any screen that cage can drive should work.
+On the hardware and OS listed under [Requirements](#requirements), with the Netdata agents already running:
 
 ```bash
 sudo apt install cage wlr-randr
