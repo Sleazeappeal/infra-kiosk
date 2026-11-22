@@ -28,6 +28,21 @@ The kiosk setup (`kiosk/`) is built for one hardware combination, and that is th
 - **Raspberry Pi OS** based on Debian 13, with its `firefox` package, plus `cage` and `wlr-randr`
 - one or more **Netdata** agents that the Pi can reach on port 19999
 
+### Display and touch stack
+
+There is no X server and no desktop environment. The picture and the touch input go through these
+components:
+
+| Layer | Package | Role |
+|---|---|---|
+| Compositor | `cage` (built on wlroots) | Wayland kiosk compositor. It takes the DSI display on tty7 and runs exactly one application full screen, with no window decorations, panels or way to switch away. It passes the touch input to that application. |
+| Rotation | `wlr-randr` | Turns the cage output to landscape (`--transform`, from `KIOSK_TRANSFORM`), because cage ignores the kernel cmdline rotation. |
+| Touch input | `libinput` (pulled in by cage) | Reads the Goodix touchscreen and maps the raw panel coordinates onto the rotated picture with the `LIBINPUT_CALIBRATION_MATRIX` udev property (`91-touch.rules`). |
+| Browser | `firefox` | A Wayland client of cage, in `--kiosk` mode. It renders the dashboard and receives the taps as touch events that become clicks. |
+| Pointer | the dashboard's CSS | There is no mouse. In `?kiosk` mode the page sets `cursor: none` and blocks the context menu, so a touch never leaves a visible cursor. |
+| Session | systemd + PAM (`pam_systemd`) | `infra-kiosk.service` opens a logind session for the `infra-kiosk` user on tty7, which gives cage access to the display and the input devices. |
+| Helper | `python3` | `infra-kiosk-helper` serves the page and drives the backlight. |
+
 Several parts depend on this hardware:
 - the DSI output lookup and the rotation;
 - the Goodix module reload at start;
