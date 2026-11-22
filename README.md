@@ -152,7 +152,23 @@ On the desktop the base URL inputs under the columns also switch a host (type th
 
 ## Kiosk setup
 
-On the hardware and OS listed under [Requirements](#requirements), with the Netdata agents already running:
+On the hardware and OS listed under [Requirements](#requirements), with the Netdata agents already running.
+
+First the display itself. This is the tested boot configuration for the Touch Display 2 on the Pi 5. The
+rotation values here only turn the boot and text console; the kiosk sets its own rotation (see
+[Orientation and touch calibration](#orientation-and-touch-calibration)).
+
+```
+# /boot/firmware/config.txt
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+dtoverlay=vc4-kms-dsi-ili9881-7inch,rotation=90
+
+# /boot/firmware/cmdline.txt (append to the existing single line)
+video=DSI-1:720x1280@60,rotation=270
+```
+
+Then the kiosk:
 
 ```bash
 sudo apt install cage wlr-randr
